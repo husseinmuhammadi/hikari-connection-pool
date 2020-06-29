@@ -74,7 +74,7 @@
                         <manifest>
                             <addClasspath>true</addClasspath>
                             <classpathPrefix>lib/</classpathPrefix>
-                            <mainClass>com.javastudio.tutorial.pom.Application</mainClass>
+                            <mainClass>ir.asanpardakht.cms.Application</mainClass>
                         </manifest>
                     </archive>
                 </configuration>

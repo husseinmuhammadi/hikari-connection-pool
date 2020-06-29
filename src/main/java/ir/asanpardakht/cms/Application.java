@@ -5,12 +5,16 @@ import com.zaxxer.hikari.HikariDataSource;
 import ir.asanpardakht.cms.common.Configs;
 import ir.asanpardakht.cms.common.HealthChecks;
 import ir.asanpardakht.cms.common.Metrics;
+import ir.asanpardakht.cms.common.db.ConnectionPool;
 import ir.asanpardakht.cms.server.CMSBootstrap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import ir.asanpardakht.cms.common.db.ConnectionPool;
 
 import javax.sql.DataSource;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 
 public class Application {
     private static final Logger logger = LoggerFactory.getLogger(Application.class);
@@ -79,16 +83,80 @@ public class Application {
             //
         });
 
-        wait(3000);
+        ThreadHelper.wait(1000);
         logger.debug("starting");
         DataSource processing = Application.getProcessing();
         logger.debug("processing started");
         DataSource transactional = Application.getTransactional();
         logger.debug("transactional started");
         logger.debug("done");
-    }
 
-    private static void wait(int millis) {
+        int next = Sequence.last() + 1;
+        if (next == -1)
+            return;
+        for (int i = next; i < 100 + next; i++) {
+            final int id = i;
+            new Thread(() -> {
+                ProductDataMgr.add(id, String.valueOf(1000000 + id));
+            }).start();
+        }
+    }
+}
+
+class Sequence {
+    private static final Logger logger = LoggerFactory.getLogger(Sequence.class);
+
+    public static int last() {
+        int last = -1;
+        try (Connection connection = Application.getTransactional().getConnection()) {
+            PreparedStatement preparedStatement = connection.prepareStatement("SELECT MAX(ID) LAST_ID FROM ACCOUNT");
+            ResultSet resultSet = preparedStatement.executeQuery();
+            while (resultSet.next()) {
+                last = resultSet.getInt(1);
+                logger.info("next ID: {}", last);
+            }
+        } catch (SQLException e) {
+            logger.error(e.getMessage(), e);
+        }
+        return last;
+    }
+}
+
+class ProductDataMgr {
+    private static final Logger logger = LoggerFactory.getLogger(ProductDataMgr.class);
+
+    public static void add(int id, String accountNo) {
+        final String SQL_QUERY = "INSERT INTO ACCOUNT (ID, ACCOUNT_NO) VALUES (?, ?)";
+
+        try {
+            logger.info("Adding new account {} - waiting for getting connection ...", accountNo);
+            Connection connection = Application.getTransactional().getConnection();
+            logger.info("Connection allocated for account {} - progress is going on ...", accountNo);
+            try (PreparedStatement preparedStatement = connection.prepareStatement(SQL_QUERY)) {
+                connection.setAutoCommit(false);
+                preparedStatement.setInt(1, id);
+                preparedStatement.setString(2, accountNo);
+                int affected = preparedStatement.executeUpdate();
+                ThreadHelper.wait(3000);
+                connection.commit();
+                logger.info("Account {} added successfully", accountNo);
+            } catch (SQLException e) {
+                logger.error(e.getMessage(), e);
+                connection.rollback();
+            } finally {
+                connection.setAutoCommit(true);
+                connection.close();
+            }
+        } catch (SQLException e) {
+            logger.error(e.getMessage(), e);
+        }
+    }
+}
+
+class ThreadHelper{
+    private static final Logger logger = LoggerFactory.getLogger(ThreadHelper.class);
+
+    public static void wait(int millis) {
         try {
             Thread.sleep(millis);
         } catch (InterruptedException e) {
